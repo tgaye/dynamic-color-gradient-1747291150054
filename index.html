@@ -1,0 +1,517 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Color Gradient</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: Arial, sans-serif;
+        }
+        
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            height: 100vh;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            max-width: 250px;
+            z-index: 100;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+        }
+        
+        button {
+            background: #444;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #555;
+        }
+        
+        .color-preview {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 10px;
+            border: 1px solid #666;
+        }
+        
+        #toggle-ui {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 101;
+        }
+    </style>
+
+<base target="_self">
+
+
+    </head><body><div id="canvas-container"></div>
+    <button id="toggle-ui">☰</button>
+    <div id="ui-container">
+        <div class="control-group">
+            <h3>Color Gradient</h3>
+            <label for="color1">Color 1</label>
+            <input type="color" id="color1" value="#ff0000">
+            <div class="color-preview" id="color1-preview"></div>
+            
+            <label for="color2">Color 2</label>
+            <input type="color" id="color2" value="#00ff00">
+            <div class="color-preview" id="color2-preview"></div>
+            
+            <label for="color3">Color 3</label>
+            <input type="color" id="color3" value="#0000ff">
+            <div class="color-preview" id="color3-preview"></div>
+        </div>
+        
+        <div class="control-group">
+            <label for="blend-factor">Blend Factor</label>
+            <input type="range" id="blend-factor" min="0" max="1" step="0.01" value="0.5">
+            
+            <label for="speed">Animation Speed</label>
+            <input type="range" id="speed" min="0" max="2" step="0.01" value="0.5">
+            
+            <label for="ripple-intensity">Ripple Intensity</label>
+            <input type="range" id="ripple-intensity" min="0" max="1" step="0.01" value="0.3">
+        </div>
+        
+        <div class="control-group">
+            <button id="preset-sunset">Sunset</button>
+            <button id="preset-ocean">Ocean</button>
+            <button id="preset-forest">Forest</button>
+            <button id="preset-neon">Neon</button>
+        </div>
+        
+        <div class="control-group">
+            <label for="zoom-level">Zoom Level</label>
+            <input type="range" id="zoom-level" min="0.1" max="5" step="0.1" value="1">
+            <button id="reset-zoom">Reset Zoom</button>
+        </div>
+    </div>
+
+    <script>
+        // Check for WebGL support
+        if (!WebGLRenderingContext) {
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = '<div style="color: white; text-align: center; padding: 20px;">Your browser does not support WebGL. Please try with a modern browser.</div>';
+            throw new Error('WebGL not supported');
+        }
+
+        // Main variables
+        let scene, camera, renderer, material, mesh;
+        let mouseX = 0, mouseY = 0;
+        let targetMouseX = 0, targetMouseY = 0;
+        let zoom = 1;
+        let targetZoom = 1;
+        let zoomCenter = { x: 0.5, y: 0.5 };
+        let isMouseDown = false;
+        let lastClickTime = 0;
+        let rippleTime = 0;
+        let ripplePosition = { x: 0.5, y: 0.5 };
+
+        // Initialize Three.js
+        function init() {
+            // Calculate dimensions respecting max-width
+            const maxWidth = 1200;
+            const aspectRatio = 16/9;
+            const width = Math.min(window.innerWidth, maxWidth);
+            const height = width / aspectRatio;
+
+            // Create scene
+            scene = new THREE.Scene();
+
+            // Create camera
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
+
+            // Create renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+
+            // Add to container
+            const container = document.getElementById('canvas-container');
+            container.appendChild(renderer.domElement);
+
+            // Create shader material
+            material = new THREE.ShaderMaterial({
+                uniforms: {
+                    time: { value: 0 },
+                    resolution: { value: new THREE.Vector2(width, height) },
+                    mouse: { value: new THREE.Vector2(0.5, 0.5) },
+                    color1: { value: new THREE.Color(0xff0000) },
+                    color2: { value: new THREE.Color(0x00ff00) },
+                    color3: { value: new THREE.Color(0x0000ff) },
+                    blendFactor: { value: 0.5 },
+                    speed: { value: 0.5 },
+                    rippleIntensity: { value: 0.3 },
+                    rippleTime: { value: 0 },
+                    ripplePosition: { value: new THREE.Vector2(0.5, 0.5) },
+                    zoom: { value: 1 },
+                    zoomCenter: { value: new THREE.Vector2(0.5, 0.5) }
+                },
+                vertexShader: `
+                    varying vec2 vUv;
+                    
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                fragmentShader: `
+                    precision highp float;
+                    
+                    uniform float time;
+                    uniform vec2 resolution;
+                    uniform vec2 mouse;
+                    uniform vec3 color1;
+                    uniform vec3 color2;
+                    uniform vec3 color3;
+                    uniform float blendFactor;
+                    uniform float speed;
+                    uniform float rippleIntensity;
+                    uniform float rippleTime;
+                    uniform vec2 ripplePosition;
+                    uniform float zoom;
+                    uniform vec2 zoomCenter;
+                    
+                    varying vec2 vUv;
+                    
+                    // Smooth random function
+                    float random(vec2 st) {
+                        return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
+                    }
+                    
+                    // 2D noise function
+                    float noise(vec2 p) {
+                        vec2 i = floor(p);
+                        vec2 f = fract(p);
+                        
+                        float a = random(i);
+                        float b = random(i + vec2(1.0, 0.0));
+                        float c = random(i + vec2(0.0, 1.0));
+                        float d = random(i + vec2(1.0, 1.0));
+                        
+                        vec2 u = f * f * (3.0 - 2.0 * f);
+                        
+                        return mix(a, b, u.x) + 
+                              (c - a) * u.y * (1.0 - u.x) + 
+                              (d - b) * u.x * u.y;
+                    }
+                    
+                    // Ripple effect
+                    float ripple(vec2 uv, vec2 center, float time, float intensity) {
+                        float dist = distance(uv, center);
+                        float wave = sin(dist * 20.0 - time * 5.0) * 0.5 + 0.5;
+                        return smoothstep(0.4, 0.6, wave) * intensity * exp(-dist * 2.0 - time * 0.5);
+                    }
+                    
+                    void main() {
+                        // Apply zoom transformation
+                        vec2 uv = (vUv - zoomCenter) / zoom + zoomCenter;
+                        
+                        // Calculate mouse influence
+                        vec2 mouseDir = mouse - uv;
+                        float mouseDist = length(mouseDir);
+                        float mouseInfluence = smoothstep(0.3, 0.0, mouseDist);
+                        
+                        // Add ripple effect if active
+                        float rippleEffect = 0.0;
+                        if (rippleTime > 0.0) {
+                            rippleEffect = ripple(uv, ripplePosition, rippleTime, rippleIntensity);
+                        }
+                        
+                        // Create dynamic noise pattern
+                        vec2 noiseCoord = uv * 2.0 + vec2(time * 0.1 * speed, time * 0.07 * speed);
+                        float n = noise(noiseCoord) * 0.2;
+                        
+                        // Create color gradient
+                        float gradient = uv.x * (1.0 + n) + uv.y * (0.5 + n * 0.5) + rippleEffect;
+                        gradient = mod(gradient + mouseInfluence * 0.3 + time * 0.05 * speed, 1.0);
+                        
+                        // Blend between colors
+                        vec3 color;
+                        if (gradient < blendFactor) {
+                            float t = gradient / blendFactor;
+                            color = mix(color1, color2, t);
+                        } else {
+                            float t = (gradient - blendFactor) / (1.0 - blendFactor);
+                            color = mix(color2, color3, t);
+                        }
+                        
+                        // Add mouse highlight
+                        color += vec3(mouseInfluence * 0.2);
+                        
+                        gl_FragColor = vec4(color, 1.0);
+                    }
+                `
+            });
+
+            // Create fullscreen quad
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('mousedown', onMouseDown);
+            document.addEventListener('mouseup', onMouseUp);
+            document.addEventListener('click', onClick);
+            document.addEventListener('wheel', onMouseWheel, { passive: false });
+            
+            // UI event listeners
+            document.getElementById('color1').addEventListener('input', updateColors);
+            document.getElementById('color2').addEventListener('input', updateColors);
+            document.getElementById('color3').addEventListener('input', updateColors);
+            document.getElementById('blend-factor').addEventListener('input', updateParams);
+            document.getElementById('speed').addEventListener('input', updateParams);
+            document.getElementById('ripple-intensity').addEventListener('input', updateParams);
+            document.getElementById('zoom-level').addEventListener('input', updateZoom);
+            document.getElementById('reset-zoom').addEventListener('click', resetZoom);
+            
+            document.getElementById('preset-sunset').addEventListener('click', () => {
+                setPreset('#FF6B6B', '#FFE66D', '#4ECDC4');
+            });
+            
+            document.getElementById('preset-ocean').addEventListener('click', () => {
+                setPreset('#1A2980', '#26D0CE', '#A8FF78');
+            });
+            
+            document.getElementById('preset-forest').addEventListener('click', () => {
+                setPreset('#134E5E', '#71B280', '#C9FFBF');
+            });
+            
+            document.getElementById('preset-neon').addEventListener('click', () => {
+                setPreset('#FF00FF', '#00FFFF', '#FFFF00');
+            });
+            
+            document.getElementById('toggle-ui').addEventListener('click', toggleUI);
+            
+            // Initialize UI
+            updateColorPreviews();
+            
+            // Start animation loop
+            animate();
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update time
+            material.uniforms.time.value += 0.01;
+            
+            // Smooth mouse movement
+            mouseX += (targetMouseX - mouseX) * 0.1;
+            mouseY += (targetMouseY - mouseY) * 0.1;
+            material.uniforms.mouse.value.set(mouseX, mouseY);
+            
+            // Smooth zoom
+            zoom += (targetZoom - zoom) * 0.1;
+            material.uniforms.zoom.value = zoom;
+            
+            // Update ripple time
+            if (rippleTime > 0) {
+                rippleTime -= 0.02;
+                material.uniforms.rippleTime.value = rippleTime;
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        // Window resize handler
+        function onWindowResize() {
+            const maxWidth = 1200;
+            const aspectRatio = 16/9;
+            const width = Math.min(window.innerWidth, maxWidth);
+            const height = width / aspectRatio;
+            
+            renderer.setSize(width, height);
+            material.uniforms.resolution.value.set(width, height);
+        }
+
+        // Mouse move handler
+        function onMouseMove(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            targetMouseX = (event.clientX - rect.left) / rect.width;
+            targetMouseY = (event.clientY - rect.top) / rect.height;
+            
+            // Update zoom center if dragging
+            if (isMouseDown) {
+                zoomCenter.x += (event.movementX / rect.width) / zoom;
+                zoomCenter.y += (event.movementY / rect.height) / zoom;
+                
+                // Clamp to [0,1] range
+                zoomCenter.x = Math.max(0, Math.min(1, zoomCenter.x));
+                zoomCenter.y = Math.max(0, Math.min(1, zoomCenter.y));
+                
+                material.uniforms.zoomCenter.value.set(zoomCenter.x, zoomCenter.y);
+            }
+        }
+
+        // Touch move handler
+        function onTouchMove(event) {
+            event.preventDefault();
+            if (event.touches.length === 1) {
+                const rect = renderer.domElement.getBoundingClientRect();
+                targetMouseX = (event.touches[0].clientX - rect.left) / rect.width;
+                targetMouseY = (event.touches[0].clientY - rect.top) / rect.height;
+            }
+        }
+
+        // Mouse down handler
+        function onMouseDown(event) {
+            isMouseDown = true;
+        }
+
+        // Mouse up handler
+        function onMouseUp(event) {
+            isMouseDown = false;
+        }
+
+        // Click handler (for ripples)
+        function onClick(event) {
+            const now = Date.now();
+            if (now - lastClickTime < 300) return; // Debounce
+            
+            lastClickTime = now;
+            
+            const rect = renderer.domElement.getBoundingClientRect();
+            ripplePosition.x = (event.clientX - rect.left) / rect.width;
+            ripplePosition.y = (event.clientY - rect.top) / rect.height;
+            
+            rippleTime = 1.0;
+            material.uniforms.ripplePosition.value.set(ripplePosition.x, ripplePosition.y);
+            material.uniforms.rippleTime.value = rippleTime;
+        }
+
+        // Mouse wheel handler (for zoom)
+        function onMouseWheel(event) {
+            event.preventDefault();
+            
+            const rect = renderer.domElement.getBoundingClientRect();
+            const mouseX = (event.clientX - rect.left) / rect.width;
+            const mouseY = (event.clientY - rect.top) / rect.height;
+            
+            // Calculate zoom direction
+            const delta = -event.deltaY * 0.001;
+            const newZoom = targetZoom * (1.0 + delta);
+            
+            // Clamp zoom
+            targetZoom = Math.max(0.1, Math.min(5.0, newZoom));
+            
+            // Update zoom center based on mouse position
+            zoomCenter.x = mouseX;
+            zoomCenter.y = mouseY;
+            material.uniforms.zoomCenter.value.set(zoomCenter.x, zoomCenter.y);
+            
+            // Update UI slider
+            document.getElementById('zoom-level').value = targetZoom;
+        }
+
+        // Update colors from UI
+        function updateColors() {
+            material.uniforms.color1.value.set(document.getElementById('color1').value);
+            material.uniforms.color2.value.set(document.getElementById('color2').value);
+            material.uniforms.color3.value.set(document.getElementById('color3').value);
+            updateColorPreviews();
+        }
+
+        // Update parameters from UI
+        function updateParams() {
+            material.uniforms.blendFactor.value = parseFloat(document.getElementById('blend-factor').value);
+            material.uniforms.speed.value = parseFloat(document.getElementById('speed').value);
+            material.uniforms.rippleIntensity.value = parseFloat(document.getElementById('ripple-intensity').value);
+        }
+
+        // Update zoom from UI
+        function updateZoom() {
+            targetZoom = parseFloat(document.getElementById('zoom-level').value);
+        }
+
+        // Reset zoom
+        function resetZoom() {
+            targetZoom = 1.0;
+            zoomCenter.x = 0.5;
+            zoomCenter.y = 0.5;
+            material.uniforms.zoomCenter.value.set(zoomCenter.x, zoomCenter.y);
+            document.getElementById('zoom-level').value = 1.0;
+        }
+
+        // Set color preset
+        function setPreset(color1, color2, color3) {
+            document.getElementById('color1').value = color1;
+            document.getElementById('color2').value = color2;
+            document.getElementById('color3').value = color3;
+            updateColors();
+        }
+
+        // Update color preview boxes
+        function updateColorPreviews() {
+            document.getElementById('color1-preview').style.backgroundColor = document.getElementById('color1').value;
+            document.getElementById('color2-preview').style.backgroundColor = document.getElementById('color2').value;
+            document.getElementById('color3-preview').style.backgroundColor = document.getElementById('color3').value;
+        }
+
+        // Toggle UI visibility
+        function toggleUI() {
+            const ui = document.getElementById('ui-container');
+            ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // Initialize the application
+        init();
+    </script>
+
+              
+          
+                
+          
+              
+</body></html>
